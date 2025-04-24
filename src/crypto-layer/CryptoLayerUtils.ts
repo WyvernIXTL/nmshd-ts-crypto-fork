@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention */
-import { AsymmetricKeySpec, CryptoHash, KeyPairHandle, KeyPairSpec, Provider } from "@nmshd/rs-crypto-types";
+import { AsymmetricKeySpec, Cipher, CryptoHash, KeyPairHandle, KeyPairSpec, Provider } from "@nmshd/rs-crypto-types";
 import { defaults } from "lodash";
+import { CryptoEncryptionAlgorithm } from "src/encryption/CryptoEncryption";
 import { CoreBuffer } from "../CoreBuffer";
 import { CryptoError } from "../CryptoError";
 import { CryptoErrorCode } from "../CryptoErrorCode";
@@ -36,6 +37,23 @@ export function asymSpecFromCryptoAlgorithm(
     }
 }
 
+export function cryptoExchangeAlgorithmFromAsymmetricKeySpec(asymSpec: AsymmetricKeySpec): CryptoExchangeAlgorithm {
+    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
+    switch (asymSpec) {
+        case "P256":
+            return CryptoExchangeAlgorithm.ECDH_P256;
+        case "P521":
+            return CryptoExchangeAlgorithm.ECDH_P521;
+        case "Curve25519":
+            return CryptoExchangeAlgorithm.ECDH_X25519;
+        default:
+            throw new CryptoError(
+                CryptoErrorCode.ExchangeWrongAlgorithm,
+                `Unsupported asymmetric key spec: ${asymSpec}`
+            );
+    }
+}
+
 export function cryptoHashAlgorithmFromAsymSpec(hashFunction: CryptoHash): CryptoHashAlgorithm {
     // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
     switch (hashFunction) {
@@ -47,7 +65,7 @@ export function cryptoHashAlgorithmFromAsymSpec(hashFunction: CryptoHash): Crypt
             return CryptoHashAlgorithm.BLAKE2B;
         default:
             throw new CryptoError(
-                CryptoErrorCode.CalUnsupportedAlgorithm,
+                CryptoErrorCode.WrongHashAlgorithm,
                 `Hash function ${hashFunction} is not supported by ts crypto.`
             );
     }
@@ -61,6 +79,21 @@ export function cryptoHashFromCryptoHashAlgorithm(algorithm: CryptoHashAlgorithm
             return "Sha2_512";
         case CryptoHashAlgorithm.BLAKE2B:
             return "Blake2b";
+    }
+}
+
+export function cryptoEncryptionAlgorithmFromCipher(cipher: Cipher): CryptoEncryptionAlgorithm {
+    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
+    switch (cipher) {
+        case "AesGcm128":
+            return CryptoEncryptionAlgorithm.AES128_GCM;
+        case "AesGcm256":
+            return CryptoEncryptionAlgorithm.AES256_GCM;
+        default:
+            throw new CryptoError(
+                CryptoErrorCode.EncryptionWrongCipher,
+                `Cipher ${cipher} is not supported by ts crypto.`
+            );
     }
 }
 

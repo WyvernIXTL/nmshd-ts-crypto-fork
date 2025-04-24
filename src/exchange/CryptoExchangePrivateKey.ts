@@ -176,8 +176,7 @@ export class CryptoExchangePrivateKey extends CryptoExchangePrivateKeyWithLibsod
      */
     public override async toPublicKey(): Promise<CryptoExchangePublicKey> {
         if (this instanceof CryptoExchangePrivateKeyHandle) {
-            const handle = this as CryptoExchangePrivateKeyHandle;
-            return CryptoExchangePublicKey.fromHandle(await handle.toPublicKey());
+            return await this.toPublicKey();
         }
         // Fallback to the libsodium-based method
         return await super.toPublicKey();

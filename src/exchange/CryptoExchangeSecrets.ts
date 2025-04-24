@@ -1,7 +1,5 @@
 import { ISerializable, ISerialized, serialize, type, validate } from "@js-soft/ts-serval";
 import { CoreBuffer, IClearable, ICoreBuffer } from "../CoreBuffer";
-import { ProviderIdentifier } from "../crypto-layer";
-import { CryptoExchangeSecretsHandle } from "../crypto-layer/exchange/CryptoExchangeSecretsHandle";
 import { CryptoSerializable } from "../CryptoSerializable";
 import { CryptoEncryptionAlgorithm } from "../encryption/CryptoEncryption";
 
@@ -158,37 +156,12 @@ export class CryptoExchangeSecrets extends CryptoExchangeSecretsWithLibsodium {
     }
 
     /**
-     * Converts this object into a crypto-layer handle if possible.
-     * @returns A Promise that resolves to a CryptoExchangeSecretsHandle.
-     * @throws If not using a crypto-layer provider or conversion fails.
-     */
-    public async toHandle(providerName: ProviderIdentifier): Promise<CryptoExchangeSecretsHandle> {
-        return await CryptoExchangeSecretsHandle.fromRawKeys(
-            this.receivingKey,
-            this.transmissionKey,
-            this.algorithm,
-            providerName
-        );
-    }
-
-    /**
-     * Creates a new CryptoExchangeSecrets from a crypto-layer handle.
-     */
-    public static fromHandle(handle: CryptoExchangeSecretsHandle): CryptoExchangeSecrets {
-        return handle as unknown as CryptoExchangeSecrets;
-    }
-
-    /**
      * Creates an instance of {@link CryptoExchangeSecrets} from a plain object or instance.
      *
      * @param value - An object conforming to {@link ICryptoExchangeSecrets} or an instance.
      * @returns An instance of {@link CryptoExchangeSecrets}.
      */
     public static override from(value: CryptoExchangeSecrets | ICryptoExchangeSecrets): CryptoExchangeSecrets {
-        if (value instanceof CryptoExchangeSecretsHandle) {
-            return value as unknown as CryptoExchangeSecrets;
-        }
-
         const base = super.fromAny(value);
         if (base instanceof CryptoExchangeSecrets) {
             return base;

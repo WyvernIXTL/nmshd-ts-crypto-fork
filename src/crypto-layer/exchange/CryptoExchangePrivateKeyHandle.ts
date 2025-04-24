@@ -1,71 +1,30 @@
-import { ISerializable, ISerialized, type } from "@js-soft/ts-serval";
-import { KeyPairSpec } from "@nmshd/rs-crypto-types";
-import { CoreBuffer, IClearable } from "../../CoreBuffer";
-import { CryptoPrivateKeyHandle } from "../CryptoPrivateKeyHandle";
-import { CryptoExchangePublicKeyHandle } from "./CryptoExchangePublicKeyHandle";
+import { Cipher, DHExchange, KeyPairSpec } from "@nmshd/rs-crypto-types";
+import { CoreBuffer } from "src/CoreBuffer";
+import { CryptoError } from "src/CryptoError";
+import { CryptoErrorCode } from "src/CryptoErrorCode";
+import { CryptoExchangePublicKey } from "src/exchange/CryptoExchangePublicKey";
+import { CryptoExchangeSecrets } from "src/exchange/CryptoExchangeSecrets";
+import { getProviderOrThrow, ProviderIdentifier } from "../CryptoLayerProviders";
+import { cryptoEncryptionAlgorithmFromCipher, cryptoExchangeAlgorithmFromAsymmetricKeySpec } from "../CryptoLayerUtils";
 
+export type ExchangeKeyPairSpec = KeyPairSpec & { cipher: Cipher };
+
+// This class did not need to be serializable. `@nmshd/transport` does not use static keys for exchanges.
 /**
- * Interface defining the serialized form of {@link CryptoExchangePrivateKeyHandle}.
+ * Represents a handle to a private key use for key exchange.
+ *
+ * This class is not serializable.
+ * Creating a static private key is not supported, because of security concerns.
  */
-export interface ICryptoExchangePrivateKeyHandleSerialized extends ISerialized {
-    spc: KeyPairSpec; // Specification/Config of key pair stored.
-    cid: string; // Crypto layer key pair id used for loading key from a provider.
-    pnm: string; // Provider name
-}
+export class CryptoExchangePrivateKeyHandle {
+    private readonly dhExchange: DHExchange;
 
-/**
- * Interface defining the structure of {@link CryptoExchangePrivateKeyHandle}.
- */
-export interface ICryptoExchangePrivateKeyHandle extends ISerializable {
-    spec: KeyPairSpec;
-    id: string;
-    providerName: string;
-}
+    /** Holds the exchange algorithm being use and what algorithm key handles should have. */
+    public readonly spec: ExchangeKeyPairSpec;
 
-/**
- * Represents a handle to a private key used for cryptographic key exchange operations within the crypto layer.
- * This class extends {@link CryptoPrivateKeyHandle} and provides a type-specific implementation for exchange private keys.
- * It securely manages private keys by only storing a reference (handle) to the key material, which is managed by the underlying crypto provider.
- * This approach enhances security by preventing direct access to the raw private key material from the application code.
- */
-@type("CryptoExchangePrivateKeyHandle")
-export class CryptoExchangePrivateKeyHandle
-    extends CryptoPrivateKeyHandle
-    implements ICryptoExchangePrivateKeyHandle, IClearable
-{
-    /**
-     * Clears sensitive data associated with this private key.
-     * Since this class only contains a handle to a key managed by the crypto provider,
-     * no actual clearing of raw key material is performed here.
-     */
-    public clear(): void {
-        // No-op for handle objects as they don't contain the actual key material
-        // The actual key material is managed by the crypto provider
-    }
-
-    /**
-     * Converts the {@link CryptoExchangePrivateKeyHandle} object into a JSON serializable object.
-     *
-     * @param verbose - If `true`, includes the `@type` property in the JSON output. Defaults to `true`.
-     * @returns An {@link ICryptoExchangePrivateKeyHandleSerialized} object that is JSON serializable.
-     */
-    public override toJSON(verbose = true): ICryptoExchangePrivateKeyHandleSerialized {
-        return {
-            spc: this.spec,
-            cid: this.id,
-            pnm: this.providerName,
-            "@type": verbose ? "CryptoExchangePrivateKeyHandle" : undefined
-        };
-    }
-
-    /**
-     * Converts the {@link CryptoExchangePrivateKeyHandle} object into a Base64 encoded string.
-     *
-     * @param verbose - If `true`, includes verbose information in the serialized output. Defaults to `true`.
-     * @returns A Base64 encoded string representing the serialized {@link CryptoExchangePrivateKeyHandle}.
-     */
-    public override toBase64(verbose = true): string {
-        return CoreBuffer.utf8_base64(this.serialize(verbose));
+    private constructor(dhExchange: DHExchange, spec: ExchangeKeyPairSpec) {
+        this.dhExchange = dhExchange;
+        this.spec = spec;
     }
 
     /**
@@ -74,66 +33,61 @@ export class CryptoExchangePrivateKeyHandle
      *
      * @returns A Promise that resolves to a {@link CryptoExchangePublicKeyHandle} instance.
      */
-    public async toPublicKey(): Promise<CryptoExchangePublicKeyHandle> {
-        return await CryptoExchangePublicKeyHandle.newFromProviderAndKeyPairHandle(this.provider, this.keyPairHandle, {
-            providerName: this.providerName,
-            keyId: this.id,
-            keySpec: this.spec
+    public async toPublicKey(): Promise<CryptoExchangePublicKey> {
+        const rawPublicKey = await this.dhExchange.getPublicKey();
+
+        return CryptoExchangePublicKey.from({
+            algorithm: cryptoExchangeAlgorithmFromAsymmetricKeySpec(this.spec.asym_spec),
+            publicKey: CoreBuffer.from(rawPublicKey)
         });
     }
 
-    /**
-     * Asynchronously creates a {@link CryptoExchangePrivateKeyHandle} instance from a generic value.
-     * This method is designed to handle both instances of {@link CryptoExchangePrivateKeyHandle} and
-     * interfaces conforming to {@link ICryptoExchangePrivateKeyHandle}.
-     *
-     * @param value - The value to be converted into a {@link CryptoExchangePrivateKeyHandle}.
-     * @returns A Promise that resolves to a {@link CryptoExchangePrivateKeyHandle} instance.
-     */
-    public static override async from(
-        value: CryptoExchangePrivateKeyHandle | ICryptoExchangePrivateKeyHandle
+    public static async new(
+        providerIdent: ProviderIdentifier,
+        spec: ExchangeKeyPairSpec
     ): Promise<CryptoExchangePrivateKeyHandle> {
-        return await this.fromAny(value);
+        const provider = getProviderOrThrow(providerIdent);
+        const dhExchange = await provider.startEphemeralDhExchange(spec);
+        return new CryptoExchangePrivateKeyHandle(dhExchange, spec);
     }
 
     /**
-     * Hook method called before the `from` method during deserialization.
-     * It performs pre-processing and validation of the input value.
-     *
-     * @param value - The value being deserialized.
-     * @returns The processed value.
+     * Asynchronously derives shared secrets using an existing DHExchange context in the 'requestor' role.
+     * Accepts the requestor's DHExchange handle and the templator's PublicKey handle.
      */
-    public static override preFrom(value: any): any {
-        if (value.cid) {
-            value = {
-                spec: value.spc,
-                id: value.cid,
-                providerName: value.pnm
-            };
+    public async deriveRequestor(templatorPublicKeyBytes: Uint8Array): Promise<CryptoExchangeSecrets> {
+        try {
+            const [rx, tx] = await this.dhExchange.deriveServerSessionKeys(templatorPublicKeyBytes); // Pass bytes here
+
+            const secrets = CryptoExchangeSecrets.from({
+                receivingKey: CoreBuffer.from(rx),
+                transmissionKey: CoreBuffer.from(tx),
+                algorithm: cryptoEncryptionAlgorithmFromCipher(this.spec.cipher)
+            });
+
+            return secrets;
+        } catch (e) {
+            throw new CryptoError(CryptoErrorCode.ExchangeKeyDerivation, `${e}`);
         }
-
-        return value;
     }
 
     /**
-     * Asynchronously creates a {@link CryptoExchangePrivateKeyHandle} from a JSON object.
-     *
-     * @param value - JSON object representing the serialized {@link CryptoExchangePrivateKeyHandle}.
-     * @returns A Promise that resolves to a {@link CryptoExchangePrivateKeyHandle} instance.
+     * Asynchronously derives shared secrets using an existing DHExchange context in the 'templator' role.
+     * Accepts the templator's DHExchange handle and the requestor's PublicKey handle.
      */
-    public static async fromJSON(
-        value: ICryptoExchangePrivateKeyHandleSerialized
-    ): Promise<CryptoExchangePrivateKeyHandle> {
-        return await this.fromAny(value);
-    }
+    public async deriveTemplator(requestorPublicKeyBytes: Uint8Array): Promise<CryptoExchangeSecrets> {
+        try {
+            const [rx, tx] = await this.dhExchange.deriveClientSessionKeys(requestorPublicKeyBytes); // Pass bytes here
 
-    /**
-     * Asynchronously creates a {@link CryptoExchangePrivateKeyHandle} from a Base64 encoded string.
-     *
-     * @param value - Base64 encoded string representing the serialized {@link CryptoExchangePrivateKeyHandle}.
-     * @returns A Promise that resolves to a {@link CryptoExchangePrivateKeyHandle} instance.
-     */
-    public static override async fromBase64(value: string): Promise<CryptoExchangePrivateKeyHandle> {
-        return await this.deserialize(CoreBuffer.base64_utf8(value));
+            const secrets = CryptoExchangeSecrets.from({
+                receivingKey: CoreBuffer.from(rx),
+                transmissionKey: CoreBuffer.from(tx),
+                algorithm: cryptoEncryptionAlgorithmFromCipher(this.spec.cipher)
+            });
+
+            return secrets;
+        } catch (e) {
+            throw new CryptoError(CryptoErrorCode.ExchangeKeyDerivation, `${e}`);
+        }
     }
 }

@@ -10,8 +10,6 @@ export * from "./encryption/CryptoSecretKeyHandle";
 export * from "./exchange/CryptoExchange";
 export * from "./exchange/CryptoExchangeKeypairHandle";
 export * from "./exchange/CryptoExchangePrivateKeyHandle";
-export * from "./exchange/CryptoExchangePublicKeyHandle";
-export * from "./exchange/CryptoExchangeSecretsHandle";
 export * from "./relationship/CryptoRelationshipPublicRequestHandle";
 export * from "./relationship/CryptoRelationshipPublicResponseHandle";
 export * from "./relationship/CryptoRelationshipRequestSecretsHandle";

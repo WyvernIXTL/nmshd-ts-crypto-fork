@@ -1,7 +1,6 @@
 import { ISerialized, serialize, type, validate } from "@js-soft/ts-serval";
 import { CoreBuffer, IClearable } from "../CoreBuffer";
 import { CryptoPublicKey } from "../CryptoPublicKey";
-import { CryptoExchangePublicKeyHandle } from "../crypto-layer/exchange/CryptoExchangePublicKeyHandle";
 import { CryptoExchangeAlgorithm } from "./CryptoExchange";
 import { CryptoExchangeValidation } from "./CryptoExchangeValidation";
 
@@ -132,23 +131,12 @@ export class CryptoExchangePublicKey extends CryptoExchangePublicKeyWithLibsodiu
     }
 
     /**
-     * Creates a new CryptoExchangePublicKey from a crypto-layer handle.
-     */
-    public static fromHandle(handle: CryptoExchangePublicKeyHandle): CryptoExchangePublicKey {
-        return handle as unknown as CryptoExchangePublicKey;
-    }
-
-    /**
      * Creates an instance of {@link CryptoExchangePublicKey} from a plain object or instance.
      *
      * @param value - An object conforming to {@link ICryptoExchangePublicKey} or an instance.
      * @returns An instance of {@link CryptoExchangePublicKey}.
      */
     public static override from(value: CryptoExchangePublicKey | ICryptoExchangePublicKey): CryptoExchangePublicKey {
-        if (value instanceof CryptoExchangePublicKeyHandle) {
-            return value as unknown as CryptoExchangePublicKey;
-        }
-
         const base = super.fromAny(value);
         if (base instanceof CryptoExchangePublicKey) {
             return base;

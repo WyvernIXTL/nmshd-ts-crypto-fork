@@ -1,13 +1,8 @@
-import { DHExchange, KeyPairSpec } from "@nmshd/rs-crypto-types";
-import { CoreBuffer } from "../../CoreBuffer";
-import { CryptoError } from "../../CryptoError";
-import { CryptoErrorCode } from "../../CryptoErrorCode";
-import { CryptoEncryptionAlgorithm } from "../../encryption/CryptoEncryption";
+import { CryptoExchangePublicKey } from "src/exchange/CryptoExchangePublicKey";
 import { CryptoExchangeSecrets } from "../../exchange/CryptoExchangeSecrets";
-import { getProviderOrThrow, ProviderIdentifier } from "../CryptoLayerProviders";
+import { ProviderIdentifier } from "../CryptoLayerProviders";
 import { CryptoExchangeKeypairHandle } from "./CryptoExchangeKeypairHandle";
-import { CryptoExchangePrivateKeyHandle } from "./CryptoExchangePrivateKeyHandle";
-import { CryptoExchangePublicKeyHandle } from "./CryptoExchangePublicKeyHandle";
+import { CryptoExchangePrivateKeyHandle, ExchangeKeyPairSpec } from "./CryptoExchangePrivateKeyHandle";
 
 /**
  * Provides cryptographic key exchange functionalities using the crypto layer.
@@ -19,11 +14,11 @@ export class CryptoExchangeWithCryptoLayer {
      * Asynchronously converts a private key handle for key exchange into its corresponding public key handle.
      *
      * @param privateKey - The {@link CryptoExchangePrivateKeyHandle} to convert.
-     * @returns A Promise that resolves to a {@link CryptoExchangePublicKeyHandle}.
+     * @returns A Promise that resolves to a {@link CryptoExchangePublicKey}.
      */
     public static async privateKeyToPublicKey(
         privateKey: CryptoExchangePrivateKeyHandle
-    ): Promise<CryptoExchangePublicKeyHandle> {
+    ): Promise<CryptoExchangePublicKey> {
         return await privateKey.toPublicKey();
     }
 
@@ -36,30 +31,11 @@ export class CryptoExchangeWithCryptoLayer {
      */
     public static async generateKeypair(
         providerIdent: ProviderIdentifier,
-        spec: KeyPairSpec
+        spec: ExchangeKeyPairSpec
     ): Promise<CryptoExchangeKeypairHandle> {
-        const provider = getProviderOrThrow(providerIdent);
-        const rawKeyPairHandle = await provider.createKeyPair(spec);
-        const privateKey = await CryptoExchangePrivateKeyHandle.newFromProviderAndKeyPairHandle(
-            provider,
-            rawKeyPairHandle
-        );
+        const privateKey = await CryptoExchangePrivateKeyHandle.new(providerIdent, spec);
         const publicKey = await privateKey.toPublicKey();
         return CryptoExchangeKeypairHandle.fromPublicAndPrivateKeys(publicKey, privateKey);
-    }
-
-    /**
-     * Asynchronously starts an ephemeral Diffie-Hellman exchange.
-     * This generates an internal ephemeral key pair within the returned DHExchange context.
-     *
-     * @param providerIdent - Identifier for the crypto provider to be used.
-     * @param spec - Specification for the ephemeral key pair to be generated (algorithm, curve).
-     * @returns A Promise that resolves to a {@link DHExchange} handle for the exchange context.
-     */
-    public static async generateDHExchange(providerIdent: ProviderIdentifier, spec: KeyPairSpec): Promise<DHExchange> {
-        const provider = getProviderOrThrow(providerIdent);
-        const dhHandle = await provider.startEphemeralDhExchange(spec);
-        return dhHandle;
     }
 
     /**
@@ -67,23 +43,10 @@ export class CryptoExchangeWithCryptoLayer {
      * Accepts the requestor's DHExchange handle and the templator's PublicKey handle.
      */
     public static async deriveRequestor(
-        requestorDHHandle: DHExchange,
-        templatorPublicKeyBytes: Uint8Array,
-        algorithm: CryptoEncryptionAlgorithm = CryptoEncryptionAlgorithm.AES256_GCM
+        requestor: CryptoExchangePrivateKeyHandle,
+        templator: CryptoExchangePublicKey
     ): Promise<CryptoExchangeSecrets> {
-        try {
-            const [rx, tx] = await requestorDHHandle.deriveServerSessionKeys(templatorPublicKeyBytes); // Pass bytes here
-
-            const secrets = CryptoExchangeSecrets.from({
-                receivingKey: CoreBuffer.from(rx),
-                transmissionKey: CoreBuffer.from(tx),
-                algorithm: algorithm
-            });
-
-            return secrets;
-        } catch (e) {
-            throw new CryptoError(CryptoErrorCode.ExchangeKeyDerivation, `${e}`);
-        }
+        return await requestor.deriveRequestor(templator.publicKey.buffer);
     }
 
     /**
@@ -91,22 +54,9 @@ export class CryptoExchangeWithCryptoLayer {
      * Accepts the templator's DHExchange handle and the requestor's PublicKey handle.
      */
     public static async deriveTemplator(
-        templatorDHHandle: DHExchange,
-        requestorPublicKeyBytes: Uint8Array,
-        algorithm: CryptoEncryptionAlgorithm = CryptoEncryptionAlgorithm.AES256_GCM
+        templator: CryptoExchangePrivateKeyHandle,
+        requestor: CryptoExchangePublicKey
     ): Promise<CryptoExchangeSecrets> {
-        try {
-            const [rx, tx] = await templatorDHHandle.deriveClientSessionKeys(requestorPublicKeyBytes); // Pass bytes here
-
-            const secrets = CryptoExchangeSecrets.from({
-                receivingKey: CoreBuffer.from(rx),
-                transmissionKey: CoreBuffer.from(tx),
-                algorithm: algorithm
-            });
-
-            return secrets;
-        } catch (e) {
-            throw new CryptoError(CryptoErrorCode.ExchangeKeyDerivation, `${e}`);
-        }
+        return await templator.deriveTemplator(requestor.publicKey.buffer);
     }
 }

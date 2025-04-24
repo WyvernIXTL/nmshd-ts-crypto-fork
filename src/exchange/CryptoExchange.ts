@@ -1,11 +1,10 @@
-import { DHExchange, KeyPairSpec } from "@nmshd/rs-crypto-types";
+import { ExchangeKeyPairSpec } from "src/crypto-layer";
 import { CoreBuffer } from "../CoreBuffer";
 import { ProviderIdentifier } from "../crypto-layer/CryptoLayerProviders";
 import { CryptoExchangeWithCryptoLayer } from "../crypto-layer/exchange/CryptoExchange";
 import { CryptoExchangeKeypairHandle } from "../crypto-layer/exchange/CryptoExchangeKeypairHandle";
 import { CryptoError } from "../CryptoError";
 import { CryptoErrorCode } from "../CryptoErrorCode";
-import { CryptoPublicKey } from "../CryptoPublicKey";
 import { CryptoEncryptionAlgorithm } from "../encryption/CryptoEncryption";
 import { SodiumWrapper } from "../SodiumWrapper";
 import { CryptoExchangeKeypair } from "./CryptoExchangeKeypair";
@@ -115,7 +114,7 @@ export class CryptoExchangeWithLibsodium {
 export class CryptoExchange extends CryptoExchangeWithLibsodium {
     public static async generateKeypairHandle(
         providerIdent: ProviderIdentifier,
-        spec: KeyPairSpec
+        spec: ExchangeKeyPairSpec
     ): Promise<CryptoExchangeKeypairHandle> {
         return await CryptoExchangeWithCryptoLayer.generateKeypair(providerIdent, spec);
     }
@@ -124,96 +123,70 @@ export class CryptoExchange extends CryptoExchangeWithLibsodium {
      * Derives session keys (requestor/server role).
      *
      * Dispatches to either libsodium or crypto-layer based on argument types:
-     * - Libsodium: If `requestorKeypair` is [[CryptoExchangeKeypair]] and `templatorPublicKey` is [[CryptoExchangePublicKey]].
-     * - Crypto-Layer: If `requestorKeypair` is [[DHExchange]] and `templatorPublicKey` is `Uint8Array`. Requires initialized provider.
+     * - Libsodium: If `requestorKeypair` is {@link CryptoExchangeKeypair} and `templatorPublicKey` is {@link CryptoExchangePublicKey}.
+     * - Crypto-Layer: If `requestorKeypair` is {@link CryptoExchangeKeypairHandle} and `templatorPublicKey` is {@link CryptoExchangePublicKey}. Requires initialized provider.
      *
-     * @param requestorKeypair The keypair/handle of the sending side ([[CryptoExchangeKeypair]] or [[DHExchange]]).
-     * @param templatorPublicKey The public key of the receiving side ([[CryptoExchangePublicKey]] or `Uint8Array`).
-     * @param algorithm The [[CryptoEncryptionAlgorithm]] to tag the derived secrets with.
-     *                  Defaults to XCHACHA20_POLY1305 (libsodium default) or AES256_GCM (crypto-layer default) depending on the path taken.
-     *                  *Note*: Consider explicitly passing the desired algorithm.
-     * @returns A Promise resolving into a [[CryptoExchangeSecrets]] object.
+     * @param requestorKeypair The keypair/handle of the sending side ({@link CryptoExchangeKeypair} or {@link CryptoExchangeKeypairHandle}).
+     * @param templatorPublicKey The public key of the receiving side ({@link CryptoExchangePublicKey}).
+     * @param algorithm The {@link CryptoEncryptionAlgorithm} to tag the derived secrets with.
+     *                  Defaults to `XCHACHA20_POLY1305` for libsodium.
+     *                  **This function throws if an algorithm is supplied for use with {@link CryptoExchangeKeypairHandle}!**
+     *                  The algorithm for {@link CryptoExchangeKeypairHandle} needs to be set at creation.
+     * @returns A Promise resolving into a {@link CryptoExchangeSecrets} object.
      * @throws {CryptoError} If argument types are incompatible, provider unavailable, or derivation fails.
      */
     public static override async deriveRequestor(
-        requestorKeypair: CryptoExchangeKeypair | DHExchange,
-        templatorPublicKey: CryptoExchangePublicKey | Uint8Array,
+        requestorKeypair: CryptoExchangeKeypair | CryptoExchangeKeypairHandle,
+        templatorPublicKey: CryptoExchangePublicKey,
         algorithm?: CryptoEncryptionAlgorithm
     ): Promise<CryptoExchangeSecrets> {
-        if (!(requestorKeypair instanceof CryptoExchangeKeypair) && templatorPublicKey instanceof Uint8Array) {
-            try {
-                const effectiveAlgorithm = algorithm ?? CryptoEncryptionAlgorithm.AES256_GCM;
-                return await CryptoExchangeWithCryptoLayer.deriveRequestor(
-                    requestorKeypair,
-                    templatorPublicKey,
-                    effectiveAlgorithm
-                );
-            } catch (e: any) {
-                if (e instanceof CryptoError) throw e;
+        if (requestorKeypair instanceof CryptoExchangeKeypairHandle) {
+            if (algorithm) {
                 throw new CryptoError(
-                    CryptoErrorCode.ExchangeKeyDerivation,
-                    `Crypto-layer key derivation (requestor) failed: ${e}`
+                    CryptoErrorCode.WrongParameters,
+                    "The algorithm used for the finished keys is set during the creation of CryptoExchangeKeypairHandle."
                 );
             }
+
+            return await CryptoExchangeWithCryptoLayer.deriveRequestor(requestorKeypair.privateKey, templatorPublicKey);
         }
 
-        if (requestorKeypair instanceof CryptoExchangeKeypair && templatorPublicKey instanceof CryptoPublicKey) {
-            const effectiveAlgorithm = algorithm ?? CryptoEncryptionAlgorithm.XCHACHA20_POLY1305;
-            return await super.deriveRequestor(requestorKeypair, templatorPublicKey, effectiveAlgorithm);
-        }
-
-        // --- Incompatible Arguments ---
-        throw new CryptoError(
-            CryptoErrorCode.WrongParameters, // Use a more specific error code
-            "Incompatible argument types for deriveRequestor. Provide (CryptoExchangeKeypair, CryptoExchangePublicKey) for libsodium OR (DHExchange, Uint8Array) for crypto-layer."
-        );
+        const effectiveAlgorithm = algorithm ?? CryptoEncryptionAlgorithm.XCHACHA20_POLY1305;
+        return await super.deriveRequestor(requestorKeypair, templatorPublicKey, effectiveAlgorithm);
     }
 
     /**
      * Derives session keys (templator/client role).
      *
      * Dispatches to either libsodium or crypto-layer based on argument types:
-     * - Libsodium: If `templatorKeypair` is [[CryptoExchangeKeypair]] and `requestorPublicKey` is [[CryptoExchangePublicKey]].
-     * - Crypto-Layer: If `templatorKeypair` is [[DHExchange]] and `requestorPublicKey` is `Uint8Array`. Requires initialized provider.
+     * - Libsodium: If `templatorKeypair` is {@link CryptoExchangeKeypair} and `requestorPublicKey` is {@link CryptoExchangePublicKey}.
+     * - Crypto-Layer: If `templatorKeypair` is {@link CryptoExchangeKeypairHandle} and `requestorPublicKey` is {@link CryptoExchangePublicKey}. Requires initialized provider.
      *
-     * @param templatorKeypair The keypair/handle of the receiving side ([[CryptoExchangeKeypair]] or [[DHExchange]]).
-     * @param requestorPublicKey The public key of the sending side ([[CryptoExchangePublicKey]] or `Uint8Array`).
-     * @param algorithm The [[CryptoEncryptionAlgorithm]] to tag the derived secrets with.
-     *                  Defaults to XCHACHA20_POLY1305 (libsodium default) or AES256_GCM (crypto-layer default) depending on the path taken.
-     *                  *Note*: Consider explicitly passing the desired algorithm.
-     * @returns A Promise resolving into a [[CryptoExchangeSecrets]] object.
+     * @param templatorKeypair The keypair/handle of the receiving side ({@link CryptoExchangeKeypair} or {@link CryptoExchangeKeypairHandle}).
+     * @param requestorPublicKey The public key of the sending side ({@link CryptoExchangePublicKey}).
+     * @param algorithm The {@link CryptoEncryptionAlgorithm} to tag the derived secrets with.
+     *                  Defaults to `XCHACHA20_POLY1305` for libsodium.
+     *                  **This function throws if an algorithm is supplied for use with {@link CryptoExchangeKeypairHandle}!**
+     *                  The algorithm for {@link CryptoExchangeKeypairHandle} needs to be set at creation.
+     * @returns A Promise resolving into a {@link CryptoExchangeSecrets} object.
      * @throws {CryptoError} If argument types are incompatible, provider unavailable, or derivation fails.
      */
     public static override async deriveTemplator(
-        templatorKeypair: CryptoExchangeKeypair | DHExchange,
-        requestorPublicKey: CryptoExchangePublicKey | Uint8Array,
+        templatorKeypair: CryptoExchangeKeypair | CryptoExchangeKeypairHandle,
+        requestorPublicKey: CryptoExchangePublicKey,
         algorithm?: CryptoEncryptionAlgorithm
     ): Promise<CryptoExchangeSecrets> {
-        if (!(templatorKeypair instanceof CryptoExchangeKeypair) && requestorPublicKey instanceof Uint8Array) {
-            try {
-                const effectiveAlgorithm = algorithm ?? CryptoEncryptionAlgorithm.AES256_GCM;
-                return await CryptoExchangeWithCryptoLayer.deriveTemplator(
-                    templatorKeypair,
-                    requestorPublicKey,
-                    effectiveAlgorithm
-                );
-            } catch (e: any) {
-                if (e instanceof CryptoError) throw e;
+        if (templatorKeypair instanceof CryptoExchangeKeypairHandle) {
+            if (algorithm) {
                 throw new CryptoError(
-                    CryptoErrorCode.ExchangeKeyDerivation,
-                    `Crypto-layer key derivation (templator) failed: ${e}`
+                    CryptoErrorCode.WrongParameters,
+                    "The algorithm used for the finished keys is set during the creation of CryptoExchangeKeypairHandle."
                 );
             }
-        }
 
-        if (templatorKeypair instanceof CryptoExchangeKeypair && requestorPublicKey instanceof CryptoPublicKey) {
-            const effectiveAlgorithm = algorithm ?? CryptoEncryptionAlgorithm.XCHACHA20_POLY1305;
-            return await super.deriveTemplator(templatorKeypair, requestorPublicKey, effectiveAlgorithm);
+            return await CryptoExchangeWithCryptoLayer.deriveTemplator(templatorKeypair.privateKey, requestorPublicKey);
         }
-
-        throw new CryptoError(
-            CryptoErrorCode.WrongParameters,
-            "Incompatible argument types for deriveTemplator. Provide (CryptoExchangeKeypair, CryptoExchangePublicKey) for libsodium OR (DHExchange, Uint8Array) for crypto-layer."
-        );
+        const effectiveAlgorithm = algorithm ?? CryptoEncryptionAlgorithm.XCHACHA20_POLY1305;
+        return await super.deriveTemplator(templatorKeypair, requestorPublicKey, effectiveAlgorithm);
     }
 }
